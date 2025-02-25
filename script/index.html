@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kubernetes HPA Calculator</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+  <style>
+    body {
+      font-family: 'Arial', sans-serif;
+      background-color: #f4f4f9;
+      color: #333;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      flex-direction: column;
+      text-align: center;
+      padding: 20px 0;
+    }
+    h1 {
+      font-size: 2.5rem;
+      margin-bottom: 20px;
+      color: #0077b6;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0px 4px 20px rgba(0, 0, 0, 0.1);
+      width: 80%;
+      max-width: 600px;
+      margin-bottom: 30px;
+    }
+    .form-group {
+      margin: 15px 0;
+    }
+    input[type="number"] {
+      padding: 10px;
+      width: 100%;
+      margin-top: 5px;
+      border: 2px solid #0077b6;
+      border-radius: 5px;
+      font-size: 1rem;
+    }
+    button {
+      background-color: #0077b6;
+      color: white;
+      font-size: 1.2rem;
+      padding: 12px 25px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+    button:hover {
+      background-color: #005f8f;
+    }
+    .result {
+      margin-top: 30px;
+      background-color: #e0f7fa;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0px 4px 20px rgba(0, 0, 0, 0.1);
+      text-align: left;
+      display: none;
+      width: 80%;
+      max-width: 600px;
+    }
+    .result h3 {
+      font-size: 1.5rem;
+      color: #0077b6;
+    }
+    .result pre {
+      background-color: #ffffff;
+      padding: 10px;
+      border-radius: 5px;
+      border: 1px solid #ddd;
+      font-size: 1rem;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+
+  <h1><i class="fab fa-kubernetes"></i> Kubernetes HPA Calculator</h1>
+
+  <div class="container">
+    <form id="hpaForm">
+      <div class="form-group">
+        <label for="CURRENT_CPU">Current CPU Usage per Pod (millicores):</label>
+        <input type="number" id="CURRENT_CPU" required />
+      </div>
+      <div class="form-group">
+        <label for="CURRENT_RAM">Current RAM Usage per Pod (MiB):</label>
+        <input type="number" id="CURRENT_RAM" required />
+      </div>
+      <div class="form-group">
+        <label for="CURRENT_REPLICAS">Current Number of Replicas:</label>
+        <input type="number" id="CURRENT_REPLICAS" required />
+      </div>
+      <div class="form-group">
+        <label for="TARGET_CPU_UTIL">Target CPU Utilization (%):</label>
+        <input type="number" id="TARGET_CPU_UTIL" required />
+      </div>
+      <div class="form-group">
+        <label for="TARGET_RAM_UTIL">Target RAM Utilization (%):</label>
+        <input type="number" id="TARGET_RAM_UTIL" required />
+      </div>
+      <div class="form-group">
+        <label for="MIN_REPLICAS">Min Replicas:</label>
+        <input type="number" id="MIN_REPLICAS" required />
+      </div>
+      <div class="form-group">
+        <label for="MAX_REPLICAS">Max Replicas:</label>
+        <input type="number" id="MAX_REPLICAS" required />
+      </div>
+      <button type="button" onclick="calculateHPA()">Calculate</button>
+    </form>
+  </div>
+
+  <div class="result" id="result">
+    <h3><i class="fas fa-check-circle"></i> HPA Calculation Results</h3>
+    <p><strong>Recommended CPU Request:</strong> <span id="cpuRequest"></span>m</p>
+    <p><strong>Recommended RAM Request:</strong> <span id="ramRequest"></span>Mi</p>
+    <p><strong>Recommended Replicas:</strong> <span id="replicas"></span> (Min: <span id="minReplicas"></span>, Max: <span id="maxReplicas"></span>)</p>
+    <h3>Suggested Kubernetes Resources</h3>
+    <pre id="k8sResources"></pre>
+  </div>
+  <button type="button" onclick="createManifest()">Create Manifest</button>
+  <pre id="fullManifest" style="display: none; background-color: #fff; padding: 10px; border: 1px solid #ddd; margin-top: 10px;"></pre>
+</div>
+
+<script>
+  function createManifest() {
+    const cpuRequest = document.getElementById('cpuRequest').textContent;
+    const ramRequest = document.getElementById('ramRequest').textContent;
+    const replicas = document.getElementById('replicas').textContent;
+    const minReplicas = document.getElementById('minReplicas').textContent;
+    const maxReplicas = document.getElementById('maxReplicas').textContent;
+    const targetCpuUtil = document.getElementById('TARGET_CPU_UTIL').value;
+    const targetRamUtil = document.getElementById('TARGET_RAM_UTIL').value;
+
+    // Generate full YAML manifest (Deployment + HPA)
+    const fullYaml = `---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+name: my-app
+labels:
+  app: my-app
+spec:
+replicas: ${replicas}
+selector:
+  matchLabels:
+    app: my-app
+template:
+  metadata:
+    labels:
+      app: my-app
+  spec:
+    containers:
+    - name: my-app-container
+      image: my-app:latest
+      resources:
+        requests:
+          memory: "${ramRequest}Mi"
+          cpu: "${cpuRequest}m"
+        limits:
+          memory: "${Math.ceil(parseInt(ramRequest) * 1.2)}Mi"
+          cpu: "${Math.ceil(parseInt(cpuRequest) * 1.2)}m"
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+name: my-app-hpa
+labels:
+  app: my-app
+spec:
+scaleTargetRef:
+  apiVersion: apps/v1
+  kind: Deployment
+  name: my-app
+minReplicas: ${minReplicas}
+maxReplicas: ${maxReplicas}
+metrics:
+- type: Resource
+  resource:
+    name: cpu
+    target:
+      type: Utilization
+      averageUtilization: ${targetCpuUtil}
+- type: Resource
+  resource:
+    name: memory
+    target:
+      type: Utilization
+      averageUtilization: ${targetRamUtil}`;
+
+    // Show full manifest in the UI
+    document.getElementById('fullManifest').textContent = fullYaml;
+    document.getElementById('fullManifest').style.display = 'block';
+  }
+</script>
+  <script>
+    function calculateHPA() {
+      const CURRENT_CPU = parseInt(document.getElementById('CURRENT_CPU').value);
+      const CURRENT_RAM = parseInt(document.getElementById('CURRENT_RAM').value);
+      const CURRENT_REPLICAS = parseInt(document.getElementById('CURRENT_REPLICAS').value);
+      const TARGET_CPU_UTIL = parseInt(document.getElementById('TARGET_CPU_UTIL').value);
+      const TARGET_RAM_UTIL = parseInt(document.getElementById('TARGET_RAM_UTIL').value);
+      const MIN_REPLICAS = parseInt(document.getElementById('MIN_REPLICAS').value);
+      const MAX_REPLICAS = parseInt(document.getElementById('MAX_REPLICAS').value);
+
+      if (isNaN(CURRENT_CPU) || isNaN(CURRENT_RAM) || isNaN(CURRENT_REPLICAS) || 
+          isNaN(TARGET_CPU_UTIL) || isNaN(TARGET_RAM_UTIL) || isNaN(MIN_REPLICAS) || isNaN(MAX_REPLICAS)) {
+        alert("Please enter valid numbers in all fields.");
+        return;
+      }
+
+      const TOTAL_CPU_USAGE = CURRENT_CPU * CURRENT_REPLICAS;
+      const TOTAL_RAM_USAGE = CURRENT_RAM * CURRENT_REPLICAS;
+
+      const RECOMMENDED_CPU_REQUEST = Math.round(TOTAL_CPU_USAGE * 100 / (CURRENT_REPLICAS * TARGET_CPU_UTIL));
+      const RECOMMENDED_RAM_REQUEST = Math.round(TOTAL_RAM_USAGE * 100 / (CURRENT_REPLICAS * TARGET_RAM_UTIL));
+
+      const REQUIRED_CPU_REPLICAS = Math.ceil((TOTAL_CPU_USAGE * 100 / RECOMMENDED_CPU_REQUEST) / TARGET_CPU_UTIL);
+      const REQUIRED_RAM_REPLICAS = Math.ceil((TOTAL_RAM_USAGE * 100 / RECOMMENDED_RAM_REQUEST) / TARGET_RAM_UTIL);
+
+      let RECOMMENDED_REPLICAS = Math.max(REQUIRED_CPU_REPLICAS, REQUIRED_RAM_REPLICAS);
+      RECOMMENDED_REPLICAS = Math.max(MIN_REPLICAS, Math.min(RECOMMENDED_REPLICAS, MAX_REPLICAS));
+
+      document.getElementById('cpuRequest').textContent = RECOMMENDED_CPU_REQUEST;
+      document.getElementById('ramRequest').textContent = RECOMMENDED_RAM_REQUEST;
+      document.getElementById('replicas').textContent = RECOMMENDED_REPLICAS;
+      document.getElementById('minReplicas').textContent = MIN_REPLICAS;
+      document.getElementById('maxReplicas').textContent = MAX_REPLICAS;
+
+      const k8sYaml = `replicaCount: ${MIN_REPLICAS}
+resources:
+  requests:
+    memory: "${RECOMMENDED_RAM_REQUEST}Mi"
+    cpu: "${RECOMMENDED_CPU_REQUEST}m"
+  limits:
+    memory: "${Math.ceil(RECOMMENDED_RAM_REQUEST * 1.2)}Mi"`;
+      
+      document.getElementById('k8sResources').textContent = k8sYaml;
+      document.getElementById('result').style.display = 'block';
+    }
+  </script>
+
+</body>
+</html>
