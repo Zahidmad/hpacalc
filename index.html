@@ -163,7 +163,7 @@
       document.getElementById('minReplicas').textContent = MIN_REPLICAS;
       document.getElementById('maxReplicas').textContent = MAX_REPLICAS;
 
-      const k8sYaml = `replicaCount: ${RECOMMENDED_REPLICAS}
+      const k8sYaml = `replicaCount: ${MIN_REPLICAS}
 resources:
   requests:
     memory: "${RECOMMENDED_RAM_REQUEST}Mi"
